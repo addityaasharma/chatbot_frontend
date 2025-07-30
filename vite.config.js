@@ -7,5 +7,5 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
-  base: './', // ✅ Important for Vercel or GitHub Pages
+  base: './',
 })
