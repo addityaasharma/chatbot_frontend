@@ -4,8 +4,25 @@ const PromptPage = () => {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // 🔧 Added for mobile menu
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [typingMessageId, setTypingMessageId] = useState(null);
   const bottomRef = useRef(null);
+
+  // Add custom styles for smooth animations
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
+      }
+      .typing-cursor {
+        animation: blink 1s infinite;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
 
   const getPrompts = async () => {
     const response = await fetch("https://wzl6mwg3-5000.inc1.devtunnels.ms/prompts");
@@ -23,6 +40,56 @@ const PromptPage = () => {
     return await response.json();
   };
 
+  // Smooth typewriter effect function
+  const typewriterEffect = (fullText, messageId) => {
+    const characters = fullText.split('');
+    let currentCharIndex = 0;
+
+    const typeNextChar = () => {
+      if (currentCharIndex < characters.length) {
+        const displayText = characters.slice(0, currentCharIndex + 1).join('');
+        
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === messageId 
+              ? { ...msg, answer: displayText, isTyping: true }
+              : msg
+          )
+        );
+        
+        currentCharIndex++;
+        
+        // Variable speed for more natural typing
+        const char = characters[currentCharIndex - 1];
+        let delay = 30; // Base speed
+        
+        if (char === '.' || char === '!' || char === '?') {
+          delay = 300; // Pause after sentences
+        } else if (char === ',' || char === ';' || char === ':') {
+          delay = 150; // Pause after punctuation
+        } else if (char === ' ') {
+          delay = 50; // Slightly slower for spaces
+        } else if (char === '\n') {
+          delay = 200; // Pause for line breaks
+        }
+        
+        setTimeout(typeNextChar, delay);
+      } else {
+        // Typing complete
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === messageId 
+              ? { ...msg, answer: fullText, isTyping: false }
+              : msg
+          )
+        );
+        setTypingMessageId(null);
+      }
+    };
+
+    typeNextChar();
+  };
+
   useEffect(() => {
     const loadInitialMessages = async () => {
       try {
@@ -31,7 +98,8 @@ const PromptPage = () => {
           const messagesWithIds = data.map((msg, index) => ({
             id: msg.id || index + 1,
             question: msg.question,
-            answer: msg.answer
+            answer: msg.answer,
+            isTyping: false
           }));
           setMessages(messagesWithIds);
         }
@@ -50,7 +118,12 @@ const PromptPage = () => {
     const trimmed = question.trim();
     if (!trimmed || isLoading) return;
 
-    const newQuestion = { id: Date.now(), question: trimmed, answer: null };
+    const newQuestion = { 
+      id: Date.now(), 
+      question: trimmed, 
+      answer: null, 
+      isTyping: false 
+    };
     setMessages(prev => [...prev, newQuestion]);
     setQuestion("");
     setIsLoading(true);
@@ -58,21 +131,23 @@ const PromptPage = () => {
     try {
       const response = await postPrompt(trimmed);
       const answer = response.answer;
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.id === newQuestion.id ? { ...msg, answer } : msg
-        )
-      );
+      
+      // Start typewriter effect
+      setTypingMessageId(newQuestion.id);
+      setIsLoading(false);
+      typewriterEffect(answer, newQuestion.id);
+      
     } catch (error) {
       console.error("Error getting answer:", error);
+      const errorMessage = "❌ Error: Could not get answer. Please check your connection and try again.";
+      
       setMessages(prev =>
         prev.map(msg =>
           msg.id === newQuestion.id
-            ? { ...msg, answer: "❌ Error: Could not get answer. Please check your connection and try again." }
+            ? { ...msg, answer: errorMessage, isTyping: false }
             : msg
         )
       );
-    } finally {
       setIsLoading(false);
     }
   };
@@ -148,7 +223,16 @@ const PromptPage = () => {
                         <span className="text-gray-500 text-sm">Thinking...</span>
                       </div>
                     ) : (
-                      <p className="whitespace-pre-wrap">{msg.answer}</p>
+                      <div className="flex items-start">
+                        <p className="whitespace-pre-wrap flex-1">{msg.answer}</p>
+                        {msg.isTyping && (
+                          <div className="ml-1 w-0.5 h-5 bg-blue-500 animate-pulse rounded-full flex-shrink-0" 
+                               style={{ 
+                                 animation: 'blink 1s infinite',
+                                 animationTimingFunction: 'ease-in-out'
+                               }}></div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -168,12 +252,12 @@ const PromptPage = () => {
                 value={question}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading}
+                disabled={isLoading || typingMessageId !== null}
                 style={{ minHeight: '50px' }}
               />
               <button
                 onClick={handleSubmit}
-                disabled={isLoading || !question.trim()}
+                disabled={isLoading || !question.trim() || typingMessageId !== null}
                 className="absolute right-2 bottom-2 w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Send message"
               >
@@ -187,8 +271,10 @@ const PromptPage = () => {
               </button>
             </div>
           </div>
-          {isLoading && (
-            <p className="text-xs text-gray-500 text-center mt-2">Getting your answer...</p>
+          {(isLoading || typingMessageId !== null) && (
+            <p className="text-xs text-gray-500 text-center mt-2">
+              {isLoading ? "Getting your answer..." : "AI is typing..."}
+            </p>
           )}
         </div>
       </div>
